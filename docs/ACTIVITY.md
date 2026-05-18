@@ -75,8 +75,8 @@ python timing.py
 
 | Endpoint | First Request | Average |
 |----------|--------------|---------|
-| All Posts | ___ms | ___ms |
-| Single Post | ___ms | ___ms |
+| All Posts | 82.7ms | 30.3ms |
+| Single Post (id=2; id=1 is a draft → 404) | 25.5ms | 10.6ms |
 
 You'll run this again after each level to see how much you've improved.
 
