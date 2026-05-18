@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # LEVEL 2 — Shared Cache (Public Data)
 # ---------------------------------------------------------------------------
+# -----------------------------------
+# ---------------------------------------------------------------------------
+
 class PostListView(APIView):
     """
     GET  /api/posts/       — Returns all published posts.
@@ -42,22 +45,53 @@ class PostListView(APIView):
         return [AllowAny()]
 
     def get(self, request):
-        cached = cache.get("posts:list")
-        if cached:
+
+   
+        params = request.query_params.urlencode()
+        cache_key = f"posts:list:{params}"
+
+     
+        cached = cache.get(cache_key)
+
+
+        if cached is not None:
+            logger.info("Cache HIT: posts list")
             return Response(cached)
 
-        posts = Post.objects.filter(status=Post.STATUS_PUBLISHED).select_related("author")
+        logger.info("Cache MISS: posts list")
+
+        posts = Post.objects.filter(
+            status=Post.STATUS_PUBLISHED
+        ).select_related("author")
+
+      
         serializer = PostSerializer(posts, many=True)
-        cache.set("posts:list", serializer.data, timeout=300)
+
+        # save response in cache for 5 minutes
+        cache.set(cache_key, serializer.data, timeout=300)
+
         return Response(serializer.data)
 
     def post(self, request):
+
         serializer = PostSerializer(data=request.data)
+
         if serializer.is_valid():
+
             serializer.save(author=request.user)
-            # YOUR CACHE INVALIDATION CODE HERE
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+            # delete old cached post list
+            cache.delete_pattern("posts:list:*")
+
+            return Response(
+                serializer.data,
+                status=status.HTTP_201_CREATED
+            )
+
+        return Response(
+            serializer.errors,
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -72,24 +106,41 @@ class PostDetailView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, post_id: int):
+
+        # unique cache key for each post
         cache_key = f"posts:detail:{post_id}"
+
+        # check cache first
         cached = cache.get(cache_key)
-        if cached:
+
+  
+        if cached is not None:
+            logger.info(f"Cache HIT: post {post_id}")
             return Response(cached)
 
+        logger.info(f"Cache MISS: post {post_id}")
+
         try:
+     
             post = Post.objects.select_related("author").get(
-                id=post_id, status=Post.STATUS_PUBLISHED
+                id=post_id,
+                status=Post.STATUS_PUBLISHED
             )
+
         except Post.DoesNotExist:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
+            return Response(
+                {"detail": "Not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+     
         serializer = PostSerializer(post)
+
+
         cache.set(cache_key, serializer.data, timeout=600)
+
         return Response(serializer.data)
-
-
-
 # ---------------------------------------------------------------------------
 # LEVEL 3 — User-Isolated Cache (Personal Data)
 # ---------------------------------------------------------------------------
