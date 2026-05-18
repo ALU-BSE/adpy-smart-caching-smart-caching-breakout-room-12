@@ -2,14 +2,6 @@
 #
 # =============================================================================
 #  SMART CACHE LAYER — GUIDED ACTIVITY
-#  Advanced Python Programming | ALU BSE
-# =============================================================================
-#
-#  This file contains three API views. Your job is to add caching to each one.
-#  Read each TODO carefully — they build on each other.
-#
-#  Run the timing script first (docs/ACTIVITY.md → Level 1) to see
-#  how slow the uncached responses are before you begin.
 # =============================================================================
 
 import time
@@ -30,13 +22,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # LEVEL 2 — Shared Cache (Public Data)
 # ---------------------------------------------------------------------------
-# -----------------------------------
-# ---------------------------------------------------------------------------
 
 class PostListView(APIView):
     """
-    GET  /api/posts/       — Returns all published posts.
-    POST /api/posts/       — Creates a new post (authenticated users only).
+    GET  /api/posts/
+    POST /api/posts/
     """
 
     def get_permissions(self):
@@ -46,13 +36,10 @@ class PostListView(APIView):
 
     def get(self, request):
 
-   
         params = request.query_params.urlencode()
         cache_key = f"posts:list:{params}"
 
-     
         cached = cache.get(cache_key)
-
 
         if cached is not None:
             logger.info("Cache HIT: posts list")
@@ -64,10 +51,8 @@ class PostListView(APIView):
             status=Post.STATUS_PUBLISHED
         ).select_related("author")
 
-      
         serializer = PostSerializer(posts, many=True)
 
-        # save response in cache for 5 minutes
         cache.set(cache_key, serializer.data, timeout=300)
 
         return Response(serializer.data)
@@ -77,43 +62,29 @@ class PostListView(APIView):
         serializer = PostSerializer(data=request.data)
 
         if serializer.is_valid():
-
             serializer.save(author=request.user)
 
-            # delete old cached post list
             cache.delete_pattern("posts:list:*")
 
-            return Response(
-                serializer.data,
-                status=status.HTTP_201_CREATED
-            )
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        return Response(
-            serializer.errors,
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # ---------------------------------------------------------------------------
-# LEVEL 2 (continued) — Single Post Cache
+# LEVEL 2 — Single Post Cache
 # ---------------------------------------------------------------------------
 
 class PostDetailView(APIView):
-    """
-    GET /api/posts/<post_id>/ — Returns a single published post.
-    """
 
     permission_classes = [AllowAny]
 
     def get(self, request, post_id: int):
 
-        # unique cache key for each post
         cache_key = f"posts:detail:{post_id}"
 
-        # check cache first
         cached = cache.get(cache_key)
 
-  
         if cached is not None:
             logger.info(f"Cache HIT: post {post_id}")
             return Response(cached)
@@ -121,88 +92,91 @@ class PostDetailView(APIView):
         logger.info(f"Cache MISS: post {post_id}")
 
         try:
-     
             post = Post.objects.select_related("author").get(
                 id=post_id,
                 status=Post.STATUS_PUBLISHED
             )
 
         except Post.DoesNotExist:
-
             return Response(
                 {"detail": "Not found."},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-     
         serializer = PostSerializer(post)
-
 
         cache.set(cache_key, serializer.data, timeout=600)
 
         return Response(serializer.data)
+
+
 # ---------------------------------------------------------------------------
-# LEVEL 3 — User-Isolated Cache (Personal Data)
+# LEVEL 3 — User-Isolated Cache (FIXED)
 # ---------------------------------------------------------------------------
 
 class MyDraftsView(APIView):
     """
-    GET /api/posts/my-drafts/ — Returns draft posts for the logged-in user only.
-
-    !! SECURITY CRITICAL !!
-    This endpoint returns private data. Every student must ensure
-    that User A can never see User B's drafts under any circumstances.
+    GET /api/posts/my-drafts/
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+
+        user = request.user
+
         # ---------------------------------------------------------------
-        # TODO (Level 3): Implement user-isolated cache-aside.
+        # LEVEL 3: USER-ISOLATED CACHE
         #
-        # Requirements:
-        #   - Cache key: MUST include the user's ID — never use a generic key
-        #   - TTL: 120 seconds (2 minutes — personal data should expire quickly)
-        #   - Auth check: already handled by permission_classes above
-        #
-        # SECURITY QUESTION to answer in your code comment:
-        #   What would happen if you used the key "my-drafts" for all users?
+        # SECURITY NOTE:
+        # If we used a shared key like "my-drafts",
+        # User A could see User B's cached drafts (data leak).
         # ---------------------------------------------------------------
 
-        # REMOVE these lines once you implement the cache below
+        cache_key = f"my-drafts:{user.id}"
+
+        cached_data = cache.get(cache_key)
+
+        if cached_data is not None:
+            logger.info("Cache HIT: my drafts")
+            return Response(cached_data)
+
+        logger.info("Cache MISS: my drafts")
+
         drafts = Post.objects.filter(
-            author=request.user,
+            author=user,
             status=Post.STATUS_DRAFT
         ).select_related("author")
 
         serializer = PostSerializer(drafts, many=True)
+
+        cache.set(cache_key, serializer.data, timeout=120)
+
         return Response(serializer.data)
 
 
 # ---------------------------------------------------------------------------
-# BONUS — Deliberately Broken View (Level 3 Bug-Spotting)
+# BONUS — Deliberately Broken View (DO NOT FIX)
 # ---------------------------------------------------------------------------
 
 class BrokenDraftsView(APIView):
-    """
-    GET /api/posts/broken-drafts/
-
-    This view has a critical security bug.
-    Your task: read the code, find the bug, and explain it in the activity sheet.
-    DO NOT fix the code here — write your answer in docs/ACTIVITY.md.
-    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # !! BUG: find it, name it, explain the real-world impact !!
+
         data = cache.get("my-drafts")
+
         if data is None:
             drafts = Post.objects.filter(
                 author=request.user,
                 status=Post.STATUS_DRAFT
             ).select_related("author")
+
             serializer = PostSerializer(drafts, many=True)
+
             data = serializer.data
+
             cache.set("my-drafts", data, timeout=120)
+
         return Response(data)
