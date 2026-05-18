@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # LEVEL 2 — Shared Cache (Public Data)
 # ---------------------------------------------------------------------------
-
 class PostListView(APIView):
     """
     GET  /api/posts/       — Returns all published posts.
@@ -43,31 +42,16 @@ class PostListView(APIView):
         return [AllowAny()]
 
     def get(self, request):
-        # ---------------------------------------------------------------
-        # TODO (Level 2): Implement cache-aside for this endpoint.
-        #
-        # Requirements:
-        #   - Cache key: should be shared across ALL users (it's public data)
-        #   - TTL: 300 seconds (5 minutes)
-        #   - On cache miss: query the DB, store in cache, return data
-        #   - On cache hit: return cached data directly
-        #
-        # Hint: use `cache.get(key)` and `cache.set(key, value, timeout)`
-        # ---------------------------------------------------------------
+        cached = cache.get("posts:list")
+        if cached:
+            return Response(cached)
 
-        # REMOVE these two lines once you implement the cache below
         posts = Post.objects.filter(status=Post.STATUS_PUBLISHED).select_related("author")
         serializer = PostSerializer(posts, many=True)
+        cache.set("posts:list", serializer.data, timeout=300)
         return Response(serializer.data)
 
     def post(self, request):
-        # ---------------------------------------------------------------
-        # TODO (Level 4): After saving the new post, invalidate the cache
-        # so the next GET reflects the new data.
-        #
-        # Question: which cache key do you need to delete here?
-        # ---------------------------------------------------------------
-
         serializer = PostSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save(author=request.user)
@@ -88,18 +72,11 @@ class PostDetailView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, post_id: int):
-        # ---------------------------------------------------------------
-        # TODO (Level 2): Implement cache-aside for a single post.
-        #
-        # Requirements:
-        #   - Cache key: must be unique per post (include the post_id)
-        #   - TTL: 600 seconds (10 minutes)
-        #   - Return 404 if the post does not exist
-        #
-        # Think: why is a longer TTL acceptable here vs the list endpoint?
-        # ---------------------------------------------------------------
+        cache_key = f"posts:detail:{post_id}"
+        cached = cache.get(cache_key)
+        if cached:
+            return Response(cached)
 
-        # REMOVE these lines once you implement the cache below
         try:
             post = Post.objects.select_related("author").get(
                 id=post_id, status=Post.STATUS_PUBLISHED
@@ -108,7 +85,9 @@ class PostDetailView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
         serializer = PostSerializer(post)
+        cache.set(cache_key, serializer.data, timeout=600)
         return Response(serializer.data)
+
 
 
 # ---------------------------------------------------------------------------
